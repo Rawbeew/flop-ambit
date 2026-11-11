@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>flop-ambit · Technocore tools</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
   :root {
     --bg: #0c0d0b;
@@ -12,6 +13,7 @@
     --accent: #7d9b76;
     --surface: #15181e;
     --danger: #c45c4a;
+    --techno: #4ecdc4;
   }
   body {
     margin: 0;
@@ -68,7 +70,24 @@
   .msg .text { word-break: break-word; }
   textarea { width: 100%; min-height: 60px; }
   .url-out { background: #111; padding: 0.75rem; border-radius: 4px; word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.8rem; }
-  #viz { width: 100%; height: 520px; background: #0a0b09; border-radius: 6px; display: block; }
+  #viz-container {
+    position: relative;
+    width: 100%;
+    height: 560px;
+    background: #050605;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  #viz-container canvas { display: block; width: 100%; height: 100%; }
+  .viz-overlay {
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--techno);
+    font-family: ui-monospace, monospace;
+    pointer-events: none;
+  }
   .tooltip {
     position: absolute;
     background: #1c2128;
@@ -78,6 +97,7 @@
     font-size: 0.8rem;
     pointer-events: none;
     display: none;
+    z-index: 10;
   }
 </style>
 </head>
@@ -168,13 +188,15 @@
     </div>
   </div>
 
-  <!-- 3D -->
+  <!-- 3D WebGL -->
   <div id="viz" class="panel">
     <div class="controls">
-      <button id="viz-refresh">Refresh data</button>
+      <button id="viz-refresh">Force refresh</button>
       <span id="viz-status" style="color: var(--muted);"></span>
     </div>
-    <canvas id="viz-canvas"></canvas>
+    <div id="viz-container">
+      <div class="viz-overlay" id="viz-overlay">TECHNOCORE · LIVE</div>
+    </div>
     <div id="tooltip" class="tooltip"></div>
   </div>
 
@@ -442,97 +464,175 @@ document.getElementById("copy-url").onclick = () => {
   navigator.clipboard.writeText(document.getElementById("url-out").textContent);
 };
 
-// --- 3D reactive view (canvas particles) ---
-let vizRunning = false;
-let particles = [];
-let animId = null;
+// --- WebGL particle system (Three.js) ---
+let vizStarted = false;
+let scene, camera, renderer, points, lines;
+let particleData = [];
+let syncTimer = null;
 
 function startViz() {
-  if (vizRunning) return;
-  vizRunning = true;
-  const canvas = document.getElementById("viz-canvas");
+  if (vizStarted) {
+    if (syncTimer) clearInterval(syncTimer);
+    syncTimer = setInterval(refreshVizData, 20000);
+    return;
+  }
+  vizStarted = true;
+
+  const container = document.getElementById("viz-container");
+  const overlay = document.getElementById("viz-overlay");
   const tooltip = document.getElementById("tooltip");
-  const ctx = canvas.getContext("2d");
   const status = document.getElementById("viz-status");
 
-  function resize() {
-    canvas.width = canvas.clientWidth * devicePixelRatio;
-    canvas.height = canvas.clientHeight * devicePixelRatio;
-    ctx.scale(devicePixelRatio, devicePixelRatio);
-  }
-  resize();
-  window.addEventListener("resize", resize);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050605);
+  scene.fog = new THREE.Fog(0x050605, 40, 120);
 
-  async function refreshParticles() {
-    status.textContent = "loading…";
+  camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 200);
+  camera.position.set(0, 8, 40);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  // Subtle grid
+  const grid = new THREE.GridHelper(80, 20, 0x1a2a2a, 0x0f1515);
+  grid.position.y = -12;
+  scene.add(grid);
+
+  async function refreshVizData() {
+    status.textContent = "syncing…";
     try {
       if (!allRooms.length) await loadRooms();
-      const top = allRooms.slice(0, 80);
-      particles = top.map((r, i) => {
+      const top = allRooms.slice(0, 90);
+      particleData = top.map((r, i) => {
         const score = r._score || scoreRoom(r);
         const idle = r.idle_seconds || 0;
-        const hot = idle < 3600;
+        const hot = idle < 1800;
+        const angle = (i / top.length) * Math.PI * 2;
+        const radius = 8 + (score / 12);
         return {
           name: r.room || r.name || "?",
           score,
           idle,
           hot,
-          x: Math.random() * canvas.clientWidth,
-          y: Math.random() * canvas.clientHeight,
-          vx: (Math.random() - 0.5) * 0.4,
-          vy: (Math.random() - 0.5) * 0.4,
-          r: 4 + Math.min(score / 8, 14),
-          color: hot ? "#c45c4a" : (score > 80 ? "#7d9b76" : "#8d9199")
+          pos: new THREE.Vector3(
+            Math.cos(angle) * radius + (Math.random()-0.5)*2,
+            (Math.random()-0.5)*6,
+            Math.sin(angle) * radius + (Math.random()-0.5)*2
+          ),
+          color: hot ? 0xc45c4a : (score > 70 ? 0x4ecdc4 : 0x7d9b76)
         };
       });
-      status.textContent = `${particles.length} rooms`;
+
+      // Rebuild points
+      if (points) scene.remove(points);
+      const geo = new THREE.BufferGeometry();
+      const positions = [];
+      const colors = [];
+      const sizes = [];
+      particleData.forEach(p => {
+        positions.push(p.pos.x, p.pos.y, p.pos.z);
+        const c = new THREE.Color(p.color);
+        colors.push(c.r, c.g, c.b);
+        sizes.push(p.hot ? 2.8 : (1.2 + p.score / 40));
+      });
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+      geo.setAttribute("size", new THREE.Float32BufferAttribute(sizes, 1));
+
+      const mat = new THREE.PointsMaterial({
+        size: 1.6,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85,
+        sizeAttenuation: true
+      });
+      points = new THREE.Points(geo, mat);
+      scene.add(points);
+
+      // Connecting lines for hot / high-score nodes
+      if (lines) scene.remove(lines);
+      const linePositions = [];
+      const hotOnes = particleData.filter(p => p.hot || p.score > 75);
+      for (let i = 0; i < hotOnes.length; i++) {
+        for (let j = i + 1; j < Math.min(hotOnes.length, i + 4); j++) {
+          const a = hotOnes[i].pos;
+          const b = hotOnes[j].pos;
+          if (a.distanceTo(b) < 25) {
+            linePositions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+          }
+        }
+      }
+      if (linePositions.length) {
+        const lineGeo = new THREE.BufferGeometry();
+        lineGeo.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
+        lines = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({
+          color: 0x4ecdc4,
+          transparent: true,
+          opacity: 0.18
+        }));
+        scene.add(lines);
+      }
+
+      overlay.textContent = `TECHNOCORE · ${particleData.length} ROOMS · LIVE`;
+      status.textContent = `synced · ${particleData.length}`;
     } catch (e) {
-      status.textContent = "failed";
+      status.textContent = "sync failed";
     }
   }
 
-  function loop() {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    ctx.clearRect(0, 0, w, h);
-    particles.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      if (p.x < 0 || p.x > w) p.vx *= -1;
-      if (p.y < 0 || p.y > h) p.vy *= -1;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = p.color;
-      ctx.globalAlpha = 0.75;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    });
-    animId = requestAnimationFrame(loop);
+  function animate() {
+    requestAnimationFrame(animate);
+    if (points) {
+      points.rotation.y += 0.0012;
+      if (lines) lines.rotation.y += 0.0012;
+    }
+    camera.position.x = Math.sin(Date.now() * 0.00008) * 4;
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
   }
 
-  canvas.onmousemove = (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    let found = null;
-    for (const p of particles) {
-      const dx = p.x - mx;
-      const dy = p.y - my;
-      if (dx*dx + dy*dy < (p.r + 4)**2) { found = p; break; }
-    }
-    if (found) {
-      tooltip.style.display = "block";
-      tooltip.style.left = (e.clientX + 12) + "px";
-      tooltip.style.top = (e.clientY + 12) + "px";
-      tooltip.textContent = `${found.name} · score ${found.score} · idle ${fmtIdle(found.idle)}`;
+  function onResize() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+  window.addEventListener("resize", onResize);
+
+  // Raycaster for hover
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.8;
+  const mouse = new THREE.Vector2();
+
+  renderer.domElement.onmousemove = (e) => {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    if (!points) return;
+    const intersects = raycaster.intersectObject(points);
+    if (intersects.length) {
+      const idx = intersects[0].index;
+      const p = particleData[idx];
+      if (p) {
+        tooltip.style.display = "block";
+        tooltip.style.left = (e.clientX + 14) + "px";
+        tooltip.style.top = (e.clientY + 14) + "px";
+        tooltip.textContent = `${p.name} · ${p.score} · ${fmtIdle(p.idle)}`;
+      }
     } else {
       tooltip.style.display = "none";
     }
   };
-  canvas.onmouseleave = () => tooltip.style.display = "none";
+  renderer.domElement.onmouseleave = () => tooltip.style.display = "none";
 
-  document.getElementById("viz-refresh").onclick = refreshParticles;
-  refreshParticles().then(loop);
+  document.getElementById("viz-refresh").onclick = refreshVizData;
+  refreshVizData();
+  animate();
+  syncTimer = setInterval(refreshVizData, 20000);
 }
 
 // Initial
