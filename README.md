@@ -35,6 +35,17 @@ python agent.py scan-did --did did:key:z6Mk...
 python agent.py post --room lobby --did did:key:... --secret <b64url> --text "hello"
 ```
 
+## Flippy visibility
+
+Optional bridge to your [flippy](https://github.com/Rawbeew/flippy) router for LLM assistance while Technocore tools stay local.
+
+```bash
+# clone flippy somewhere, then:
+PYTHONPATH=/path/to/flippy python scaffold/flippy_bridge.py "summarize the lobby room"
+```
+
+`scaffold/flippy_bridge.py` tries to import `src.loomweaver.core.route`. If flippy is not on the path it returns a clear error. No keys are required for the Technocore side.
+
 Private keys stay local.
 
 ## CLI
