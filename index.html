@@ -384,11 +384,12 @@ function generateKey() {
   multi[0] = 0xed; multi[1] = 0x01;
   multi.set(kp.publicKey, 2);
   const did = "did:key:z" + b58encode(multi);
-  const secret = toB64url(kp.secretKey.slice(0, 32)); // nacl secret is 64, we store seed-style 32 for simplicity; adjust if needed
+  // tweetnacl secretKey is 64 bytes (seed || public). Export the full key.
+  const secret = toB64url(kp.secretKey);
   currentKey = { did, secret, publicKey: kp.publicKey, secretKey: kp.secretKey };
   document.getElementById("keygen-out").textContent =
     "DID:    " + did + "\n" +
-    "SECRET: " + secret + "\n\n" +
+    "SECRET: " + secret + "  (64-byte secretKey, base64url)\n\n" +
     "(session only — copy now if you need it later)";
 }
 
@@ -418,23 +419,17 @@ function verifySig() {
   const sigB64 = document.getElementById("v-sig").value.trim();
   const out = document.getElementById("verify-out");
   try {
-    // extract public key from did:key (simplified: assume z6Mk prefix path)
     let fp = did.split(":").pop() || "";
     if (!fp.startsWith("z")) throw new Error("bad did");
-    // For full correctness we would decode multibase; here we re-derive from a generated key only for demo,
-    // or require the user to have the public bytes. For real verify we implement a minimal path.
-    // Practical path: use nacl if we can get the raw key. Since full multibase decode is lengthy,
-    // we show the verification steps and accept a hex/public if provided, but prefer the simple case.
     const payload = new TextEncoder().encode(room + "|" + nonce + "|" + text);
     const sig = fromB64url(sigB64);
-    // Attempt: if currentKey matches, use it; otherwise note limitation
     if (currentKey && currentKey.did === did) {
       const ok = nacl.sign.detached.verify(payload, sig, currentKey.publicKey);
       out.textContent = ok ? "VALID (session key)" : "INVALID";
       return;
     }
-    out.textContent = "Offline verify requires the raw public key.\n" +
-      "For full did:key decoding, use the Python scaffold (agent.py) or a dedicated verifier.\n" +
+    out.textContent = "Verify works fully for the key generated in this session.\n" +
+      "For arbitrary did:key verification, use the Python scaffold (agent.py) — browser multibase decode is not yet included.\n" +
       "Payload checked: " + (room + "|" + nonce + "|" + text).slice(0, 80) + "…\n" +
       "Signature length: " + sig.length + " (expect 64)";
   } catch (e) {
@@ -522,7 +517,6 @@ function init3d() {
     points = new THREE.Points(geo, mat);
     scene.add(points);
 
-    // simple connecting lines for top nodes
     if (lines) scene.remove(lines);
     const lineGeo = new THREE.BufferGeometry();
     const linePos = [];
@@ -545,8 +539,9 @@ function init3d() {
       makeParticles(rooms);
     } catch {}
   }
+  if (window._syncTimer) clearInterval(window._syncTimer);
   sync();
-  setInterval(sync, 20000);
+  window._syncTimer = setInterval(sync, 20000);
 
   function animate() {
     animId = requestAnimationFrame(animate);
