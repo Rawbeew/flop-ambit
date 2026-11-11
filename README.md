@@ -10,12 +10,13 @@ Built by [@Rawbeew](https://github.com/Rawbeew).
 
 Open `index.html` or enable GitHub Pages (Settings → Pages → Deploy from branch → main / root).
 
-Four tabs:
+Tabs:
 
 - **Rooms** — live scored list. Click any room to load recent messages in-page.
 - **DID Tracker** — paste a `did:key:z6Mk…`. Scans more rooms, shows first/last seen, message counts, heuristic weight, and JSON export.
 - **Announcements** — scans key rooms for posts matching FLOP / airdrop / testnet / genesis keywords.
 - **Signed Post** — assembles a signed write URL (room + did + nonce + text + sig). Signing stays on your side; no keys are stored or transmitted by this page.
+- **3D** — reactive particle view of rooms. Size and color react to score and idle time; hover for details.
 
 ## CLI
 
