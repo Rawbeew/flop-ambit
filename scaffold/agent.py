@@ -1,21 +1,22 @@
-"""Technocore agent scaffold.
+"""Technocore agent with tools.
 
-Inspired by flippy's loomweaver agent loop (plan → act → observe → done)
-and least-privilege tool selection.
+Inspired by flippy/loomweaver's plan → act → observe loop and least-privilege
+tool selection. Tools are explicit and local-key only.
 
-Focused on Technocore room operations: local did:key generation,
-signed writes, and room reads.
+Dependencies: pynacl
 
-Dependencies: pynacl (for Ed25519).
-
-Usage:
+Commands:
     python agent.py --generate
-    python agent.py --read --room lobby
-    python agent.py --did did:key:... --secret <b64url-secret> --room lobby --text "hello"
+    python agent.py tools          # list available tools
+    python agent.py list-rooms
+    python agent.py read --room lobby --limit 30
+    python agent.py post --room lobby --text "hello" --did ... --secret ...
+    python agent.py scan-did --did did:key:... 
 """
 import argparse
 import base64
 import json
+import sys
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -24,6 +25,7 @@ from datetime import datetime, timezone
 import nacl.signing
 
 BASE = "https://technocore.chat"
+UA = "flop-ambit/agent"
 
 
 def b58encode(data: bytes) -> str:
@@ -50,7 +52,61 @@ def from_b64url(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + pad)
 
 
-def generate_did():
+def _get(url: str, timeout: int = 15) -> dict | list | str:
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read().decode()
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError:
+                return body[:500]
+    except urllib.error.HTTPError as e:
+        return {"error": e.code, "body": e.read().decode()[:300]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def tool_list_rooms(limit: int = 100) -> list:
+    data = _get(f"{BASE}/rooms?format=json&limit={limit}")
+    if isinstance(data, dict):
+        return data.get("rooms", [])
+    return data if isinstance(data, list) else []
+
+
+def tool_read_room(room: str, limit: int = 30) -> dict:
+    data = _get(f"{BASE}/r/{urllib.parse.quote(room)}?format=json&limit={limit}")
+    return data if isinstance(data, dict) else {"messages": []}
+
+
+def tool_post(room: str, did: str, secret_b64: str, text: str, nonce: str | None = None) -> dict:
+    if not nonce:
+        nonce = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+    sk = nacl.signing.SigningKey(from_b64url(secret_b64))
+    payload = f"{room}|{nonce}|{text}".encode()
+    sig = to_b64url(sk.sign(payload).signature)
+    url = f"{BASE}/r/{urllib.parse.quote(room)}/say-signed/{urllib.parse.quote(did)}/{sig}/{nonce}/{urllib.parse.quote(text)}"
+    result = _get(url)
+    return {"url": url, "result": result, "nonce": nonce}
+
+
+def tool_scan_did(did: str, rooms: list[str] | None = None, limit_per_room: int = 80) -> dict:
+    if rooms is None:
+        rooms = ["lobby", "meta", "flop", "technocore", "kibble", "events"]
+    short = did.split(":")[-1][-16:]
+    found = {}
+    total = 0
+    for room in rooms:
+        data = tool_read_room(room, limit_per_room)
+        msgs = data.get("messages") or []
+        mine = [m for m in msgs if (m.get("from") or "").endswith(short) or m.get("from") == did]
+        if mine:
+            found[room] = len(mine)
+            total += len(mine)
+    return {"did": did, "total_messages": total, "rooms": found}
+
+
+def tool_generate() -> tuple[str, str]:
     sk = nacl.signing.SigningKey.generate()
     vk = sk.verify_key
     multi = bytes([0xED, 0x01]) + bytes(vk)
@@ -59,65 +115,81 @@ def generate_did():
     return did, secret
 
 
-def sign_payload(secret_b64: str, room: str, nonce: str, text: str) -> str:
-    sk = nacl.signing.SigningKey(from_b64url(secret_b64))
-    payload = f"{room}|{nonce}|{text}".encode()
-    sig = sk.sign(payload).signature
-    return to_b64url(sig)
-
-
-def post_signed(room: str, did: str, secret_b64: str, text: str, nonce: str = None):
-    if nonce is None:
-        nonce = str(int(datetime.now(timezone.utc).timestamp() * 1000))
-    sig = sign_payload(secret_b64, room, nonce, text)
-    url = f"{BASE}/r/{room}/say-signed/{did}/{sig}/{nonce}/{urllib.parse.quote(text)}"
-    req = urllib.request.Request(url, headers={"User-Agent": "flop-ambit/scaffold"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status, r.read().decode()[:200]
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()[:200]
-
-
-def fetch_room(room: str, limit: int = 20):
-    url = f"{BASE}/r/{room}?format=json&limit={limit}"
-    req = urllib.request.Request(url, headers={"User-Agent": "flop-ambit/scaffold"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(r.read())
+TOOLS = {
+    "list_rooms": "Fetch scored public rooms",
+    "read_room": "Read recent messages from a room",
+    "post": "Sign and post a message (requires did + secret)",
+    "scan_did": "Scan common rooms for a DID's recent activity",
+    "generate": "Create a new local did:key",
+}
 
 
 def main():
-    p = argparse.ArgumentParser(description="Technocore agent scaffold")
-    p.add_argument("--generate", action="store_true", help="Generate a new did:key (local)")
+    p = argparse.ArgumentParser(description="Technocore agent tools")
+    p.add_argument("command", nargs="?", default="help",
+                   choices=["help", "tools", "generate", "list-rooms", "read", "post", "scan-did"])
+    p.add_argument("--room")
+    p.add_argument("--limit", type=int, default=30)
     p.add_argument("--did")
-    p.add_argument("--secret", help="base64url secret key")
-    p.add_argument("--room", default="lobby")
+    p.add_argument("--secret")
     p.add_argument("--text")
     p.add_argument("--nonce")
-    p.add_argument("--read", action="store_true", help="Just read the room")
     args = p.parse_args()
 
-    if args.generate:
-        did, secret = generate_did()
+    if args.command in ("help", None):
+        p.print_help()
+        print("\nTools:")
+        for k, v in TOOLS.items():
+            print(f"  {k:12} {v}")
+        return
+
+    if args.command == "tools":
+        print(json.dumps(TOOLS, indent=2))
+        return
+
+    if args.command == "generate":
+        did, secret = tool_generate()
         print(f"DID:    {did}")
         print(f"SECRET: {secret}")
-        print("(Save the secret. It never leaves this machine.)")
+        print("(Save the secret. Never share it.)")
         return
 
-    if args.read:
-        data = fetch_room(args.room)
-        msgs = data.get("messages", []) if isinstance(data, dict) else data
-        for m in msgs[-10:]:
-            print(f"{m.get('from','~')[:24]:24} {m.get('text','')[:100]}")
+    if args.command == "list-rooms":
+        rooms = tool_list_rooms(args.limit)
+        for r in rooms[:args.limit]:
+            name = r.get("room") or r.get("name") or "?"
+            idle = r.get("idle_seconds", 0)
+            seq = r.get("last_seq", 0)
+            print(f"{name:32} idle={idle:6.0f}s  seq={seq}")
         return
 
-    if args.text and args.did and args.secret:
-        status, body = post_signed(args.room, args.did, args.secret, args.text, args.nonce)
-        print(f"HTTP {status}")
-        print(body)
+    if args.command == "read":
+        if not args.room:
+            print("--room required", file=sys.stderr)
+            sys.exit(1)
+        data = tool_read_room(args.room, args.limit)
+        msgs = data.get("messages") or []
+        for m in msgs[-args.limit:]:
+            frm = (m.get("from") or "~")[:28]
+            text = (m.get("text") or "")[:120]
+            print(f"{frm:28} {text}")
         return
 
-    p.print_help()
+    if args.command == "post":
+        if not all([args.room, args.did, args.secret, args.text]):
+            print("--room --did --secret --text required", file=sys.stderr)
+            sys.exit(1)
+        result = tool_post(args.room, args.did, args.secret, args.text, args.nonce)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "scan-did":
+        if not args.did:
+            print("--did required", file=sys.stderr)
+            sys.exit(1)
+        result = tool_scan_did(args.did)
+        print(json.dumps(result, indent=2))
+        return
 
 
 if __name__ == "__main__":
