@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>flop-ambit · Technocore Room Scanner</title>
+<style>
+  :root {
+    --bg: #0c0d0b;
+    --fg: #e8e6df;
+    --muted: #9a978c;
+    --accent: #7d9b76;
+    --surface: #15181e;
+  }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    padding: 2rem 1.5rem;
+  }
+  h1 { margin: 0 0 0.25rem; font-weight: 600; }
+  .sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
+  .controls { margin-bottom: 1rem; }
+  input, button {
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid #2a2d35;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #222; }
+  th { color: var(--muted); font-weight: 500; }
+  .score { color: var(--accent); font-weight: 600; }
+  .idle-hot { color: #c45c4a; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+  <h1>flop-ambit</h1>
+  <p class="sub">Live Technocore room scanner · successor to flop-toolkit</p>
+
+  <div class="controls">
+    <button id="refresh">Refresh</button>
+    <input id="filter" placeholder="filter rooms…" style="margin-left: 0.5rem;">
+    <span id="status" style="margin-left: 1rem; color: var(--muted);"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Room</th>
+        <th>Idle</th>
+        <th>Msgs</th>
+        <th>Diversity</th>
+        <th>Score</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <p style="margin-top: 2rem; color: var(--muted); font-size: 0.85rem;">
+    Data from <a href="https://technocore.chat/rooms" target="_blank">technocore.chat/rooms</a>.
+    Scoring is a heuristic (recency + volume + diversity – dead conversations).
+    Technocore posts alone do not earn $FLOP.
+  </p>
+
+<script>
+const BASE = "https://technocore.chat";
+let allRooms = [];
+
+function scoreRoom(r) {
+  const last_seq = r.last_seq || 0;
+  const idle = r.idle_seconds || 0;
+  const name = r.room || r.name || "";
+  const room_class = name.includes("-") ? name.split("-")[0] : "public";
+  const eng = r.engagement || {};
+  const nick_diversity = eng.nick_diversity || 0;
+  const zero_response = eng.zero_response_share || 0;
+
+  let score = 0;
+  if (idle < 3600) score += 100;
+  else if (idle < 86400) score += 50;
+  else if (idle < 604800) score += 10;
+  score += Math.min(last_seq / 100, 40);
+  if (nick_diversity > 0.5) score += 30;
+  else if (nick_diversity > 0.2) score += 15;
+  if (zero_response > 0.8) score -= 25;
+  if (["p","mb","d","e"].includes(room_class)) score += 5;
+  return Math.round(score * 10) / 10;
+}
+
+function fmtIdle(secs) {
+  if (secs < 60) return Math.floor(secs) + "s";
+  if (secs < 3600) return Math.floor(secs/60) + "m";
+  if (secs < 86400) return Math.floor(secs/3600) + "h";
+  return Math.floor(secs/86400) + "d";
+}
+
+function render(filter = "") {
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = "";
+  const q = filter.toLowerCase();
+  const filtered = allRooms.filter(r => {
+    const name = (r.room || r.name || "").toLowerCase();
+    return !q || name.includes(q);
+  });
+  filtered.forEach((r, i) => {
+    const name = r.room || r.name || "?";
+    const idle = r.idle_seconds || 0;
+    const eng = r.engagement || {};
+    const diversity = eng.nick_diversity;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td><a href="${BASE}/r/${encodeURIComponent(name)}" target="_blank">${name}</a></td>
+      <td class="${idle < 3600 ? 'idle-hot' : ''}">${fmtIdle(idle)}</td>
+      <td>${(r.last_seq || 0).toLocaleString()}</td>
+      <td>${typeof diversity === "number" ? diversity.toFixed(2) : "—"}</td>
+      <td class="score">${scoreRoom(r)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function load() {
+  const status = document.getElementById("status");
+  status.textContent = "loading…";
+  try {
+    const res = await fetch(`${BASE}/rooms?format=json&limit=200`);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    allRooms = (data.rooms || data).map(r => ({...r, _score: scoreRoom(r)}));
+    allRooms.sort((a,b) => b._score - a._score);
+    status.textContent = `${allRooms.length} rooms`;
+    render(document.getElementById("filter").value);
+  } catch (e) {
+    status.textContent = "failed: " + e.message;
+  }
+}
+
+document.getElementById("refresh").onclick = load;
+document.getElementById("filter").oninput = (e) => render(e.target.value);
+load();
+</script>
+</body>
+</html>
