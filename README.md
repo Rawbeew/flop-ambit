@@ -12,10 +12,11 @@ Open `index.html` or enable GitHub Pages (Settings → Pages → Deploy from bra
 
 Tabs:
 
-- **Rooms** — live scored list. Click any room to load recent messages in-page.
+- **Rooms** — live scored list (quality-aware: recency, volume, nick diversity, zero-response share). Click any room to load recent messages in-page.
 - **DID Tracker** — paste a `did:key:z6Mk…`. Scans more rooms, shows first/last seen, message counts, heuristic weight, and JSON export.
-- **Announcements** — scans key rooms for posts matching FLOP / airdrop / testnet / genesis keywords.
-- **Signed Post** — assembles a signed write URL (room + did + nonce + text + sig). Signing stays on your side; no keys are stored or transmitted by this page.
+- **Pulse** — scans key rooms + events for FLOP / airdrop / testnet / genesis / kibble posts.
+- **Keygen + Sign** — generate an Ed25519 did:key in the browser (tweetnacl). Private key never leaves the machine. Sign a message and get a ready write URL.
+- **Verify** — offline signature verification for any did + room + nonce + text + sig.
 - **3D** — real-time WebGL particle system (Three.js). Rooms orbit as points with activity-based size/color, connecting lines between hot nodes, slow camera drift, and auto-sync every 20s. Hover for details. Technoesque grid + fog.
 
 ## CLI
