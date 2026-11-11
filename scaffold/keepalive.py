@@ -12,7 +12,6 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
-from datetime import datetime, timezone
 
 BASE = "https://technocore.chat"
 UA = "flop-ambit/keepalive"
@@ -30,7 +29,6 @@ def _get(url: str):
 
 
 def note_path(did: str) -> str:
-    # Prefer sharded path. Last 16 of fingerprint after z6Mk
     fp = did.split(":")[-1]
     if fp.startswith("z6Mk"):
         fp = fp[4:]
@@ -52,17 +50,19 @@ def check_note(did: str):
 
 def refresh_note(did: str, value: str):
     path = note_path(did)
-    url = f"{BASE}{path}?if_absent=0"
-    # Unsigned note write via GET with value in path is not standard;
-    # Technocore notes use POST or the say-style for some namespaces.
-    # For simplicity we report the URL the user can hit or use the agent post tool.
-    # Real refresh is a plain write to the note path.
-    data = value.encode()
+    # Prefer the documented GET write lane for short values
+    encoded = urllib.parse.quote(value, safe="")
+    url = f"{BASE}{path}/set/{encoded}"
+    status, body = _get(url)
+    if status == 200:
+        return status, body
+    # Fallback to POST with JSON body
+    data = json.dumps({"value": value}).encode()
     req = urllib.request.Request(
         f"{BASE}{path}",
         data=data,
         method="POST",
-        headers={"User-Agent": UA, "Content-Type": "text/plain"},
+        headers={"User-Agent": UA, "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=12) as r:
