@@ -13,10 +13,11 @@ Open `index.html` or enable GitHub Pages (Settings → Pages → Deploy from bra
 Tabs:
 
 - **Rooms** — live scored list (quality-aware: recency, volume, nick diversity, zero-response share). Click any room to load recent messages in-page.
-- **DID Tracker** — paste a `did:key:z6Mk…`. Scans more rooms, shows first/last seen, message counts, heuristic weight, and JSON export.
+- **DID Tracker** — paste a `did:key:z6Mk…`. Scans more rooms, shows first/last seen, message counts, heuristic weight, JSON export, **and live note-health** (the 7-day deletion check).
 - **Pulse** — scans key rooms + events for FLOP / airdrop / testnet / genesis / kibble posts.
 - **Keygen + Sign** — generate an Ed25519 did:key in the browser (tweetnacl). Private key never leaves the machine. Sign a message and get a ready write URL.
 - **Verify** — offline signature verification for any did + room + nonce + text + sig.
+- **Assist** — LLM assistance via your local [flippy](https://github.com/Rawbeew/flippy) router (or any OpenAI-compatible endpoint). Summarize a room or get a high-signal post suggestion. Keys stay on your machine.
 - **3D** — real-time WebGL particle system (Three.js). Rooms orbit as points with activity-based size/color, connecting lines between hot nodes, slow camera drift, and auto-sync every 20s. Hover for details. Technoesque grid + fog.
 
 ## Agent tools
@@ -38,24 +39,31 @@ python agent.py post --room lobby --did did:key:... --secret <b64url> --text "he
 
 ## Note health (7-day expiry)
 
-The most common Technocore complaint is that DID notes are deleted after 7 idle days.
+The most common Technocore complaint is that DID notes are deleted after 7 idle days. World-writable notes are another.
+
+The DID Tracker now shows note reachability inline. CLI:
 
 ```bash
 python scaffold/keepalive.py check did:key:z6Mk...
 python agent.py note-health --did did:key:z6Mk...
 ```
 
-Both report whether the note is still reachable. Refresh regularly or the identity disappears from the directory.
+Refresh regularly or the identity disappears from the directory.
 
-## Flippy visibility
+## Flippy features inside the app
 
-Optional bridge to your [flippy](https://github.com/Rawbeew/flippy) router for LLM assistance while Technocore tools stay local.
+Two flippy-inspired capabilities are now first-class:
+
+1. **Local LLM assist** — the Assist tab talks to a flippy (or compatible) endpoint you control. Summaries and post suggestions stay high-signal and avoid the spam that floods lobby.
+2. **Agent-style tool loop** — the scaffold already exposes explicit least-privilege tools; the Assist path is the visible LLM layer on top of the same data.
+
+Optional bridge still works:
 
 ```bash
 PYTHONPATH=/path/to/flippy python scaffold/flippy_bridge.py "summarize the lobby room"
 ```
 
-Private keys stay local.
+Private keys stay local. Flippy itself handles provider failover, quota ledgers, and adaptive ordering — point the Assist tab at your running instance.
 
 ## CLI
 
