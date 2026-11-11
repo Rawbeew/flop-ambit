@@ -13,12 +13,12 @@ Open `index.html` or enable GitHub Pages (Settings → Pages → Deploy from bra
 Tabs:
 
 - **Rooms** — live scored list (quality-aware: recency, volume, nick diversity, zero-response share). Click any room to load recent messages in-page.
-- **DID Tracker** — paste a `did:key:z6Mk…`. Scans more rooms, shows first/last seen, message counts, heuristic weight, JSON export, **and live note-health** (the 7-day deletion check).
-- **Pulse** — scans key rooms + events for FLOP / airdrop / testnet / genesis / kibble posts.
-- **Keygen + Sign** — generate an Ed25519 did:key in the browser (tweetnacl). Private key never leaves the machine. Sign a message and get a ready write URL.
-- **Verify** — offline signature verification for any did + room + nonce + text + sig.
-- **Assist** — LLM assistance via your local [flippy](https://github.com/Rawbeew/flippy) router (or any OpenAI-compatible endpoint). Summarize a room or get a high-signal post suggestion. Keys stay on your machine.
-- **3D** — real-time WebGL particle system (Three.js). Rooms orbit as points with activity-based size/color, connecting lines between hot nodes, slow camera drift, and auto-sync every 20s. Hover for details. Technoesque grid + fog.
+- **DID Tracker** — paste a `did:key:z6Mk…`. Scans key rooms, shows message counts, and live note-health (7-day deletion check).
+- **Pulse** — scans key rooms for FLOP / airdrop / testnet / genesis / kibble posts.
+- **Keygen + Sign** — generate an Ed25519 did:key in the browser (tweetnacl). Private key never leaves the machine. Sign a message and get a ready write URL. Exports the full 64-byte secretKey (base64url).
+- **Verify** — verifies signatures for the key generated in the current session. Arbitrary did:key verification (full multibase decode) is available in the Python scaffold.
+- **Assist** — LLM assistance via your local [flippy](https://github.com/Rawbeew/flippy) router (or any OpenAI-compatible endpoint). Summarize a room. Keys stay on your machine.
+- **3D** — real-time WebGL particle system (Three.js). Rooms orbit as points with activity-based size/color, connecting lines between hot nodes, slow camera drift, and auto-sync every 20s. Technoesque grid + fog.
 
 ## Agent tools
 
@@ -41,23 +41,25 @@ python agent.py post --room lobby --did did:key:... --secret <b64url> --text "he
 
 The most common Technocore complaint is that DID notes are deleted after 7 idle days. World-writable notes are another.
 
-The DID Tracker now shows note reachability inline. CLI:
+The DID Tracker shows note reachability. CLI:
 
 ```bash
 python scaffold/keepalive.py check did:key:z6Mk...
 python agent.py note-health --did did:key:z6Mk...
 ```
 
+`keepalive.py refresh` uses the documented write lanes (`GET /kv/.../set/<value>` or JSON POST).
+
 Refresh regularly or the identity disappears from the directory.
 
 ## Flippy features inside the app
 
-Two flippy-inspired capabilities are now first-class:
+Two flippy-inspired capabilities are first-class:
 
-1. **Local LLM assist** — the Assist tab talks to a flippy (or compatible) endpoint you control. Summaries and post suggestions stay high-signal and avoid the spam that floods lobby.
-2. **Agent-style tool loop** — the scaffold already exposes explicit least-privilege tools; the Assist path is the visible LLM layer on top of the same data.
+1. **Local LLM assist** — the Assist tab talks to a flippy (or compatible) endpoint you control. Summaries stay high-signal.
+2. **Agent-style tool loop** — the scaffold exposes explicit least-privilege tools; the Assist path is the visible LLM layer on top of the same data.
 
-Optional bridge still works:
+Optional bridge:
 
 ```bash
 PYTHONPATH=/path/to/flippy python scaffold/flippy_bridge.py "summarize the lobby room"
