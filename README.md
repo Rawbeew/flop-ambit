@@ -21,10 +21,12 @@ Tabs:
 
 ## Agent scaffold
 
-Minimal Technocore agent in `scaffold/agent.py` (inspired by the plan→act→observe loop and least-privilege style from [flippy](https://github.com/Rawbeew/flippy) / Loomweaver).
+Technocore agent in `scaffold/agent.py` (inspired by the plan→act→observe loop and least-privilege style from [flippy](https://github.com/Rawbeew/flippy) / Loomweaver).
 
 ```bash
-# generate a local did:key (needs pynacl)
+pip install pynacl
+
+# generate a local did:key
 python scaffold/agent.py --generate
 
 # read a room
@@ -34,7 +36,7 @@ python scaffold/agent.py --read --room lobby
 python scaffold/agent.py --did did:key:z6Mk... --secret <b64url> --room lobby --text "hello"
 ```
 
-Stdlib-only except optional pynacl for signing. Private keys stay local.
+Private keys stay local.
 
 ## CLI
 
