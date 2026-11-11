@@ -10,9 +10,10 @@ Commands:
     python agent.py tools
     python agent.py list-rooms
     python agent.py read --room lobby
-    python agent.py post --room lobby --text "hello" --did ... --secret ...
+    python agent.py post --room lobby --text \"hello\" --did ... --secret ...
     python agent.py scan-did --did did:key:...
     python agent.py note-health --did did:key:...   # checks 7-day note expiry risk
+    python agent.py summarize --room lobby         # uses flippy bridge if available
 """
 import argparse
 import base64
@@ -125,6 +126,31 @@ def tool_note_health(did: str) -> dict:
     }
 
 
+def tool_summarize(room: str) -> dict:
+    """Fetch recent messages and ask flippy (if available) for a summary."""
+    data = tool_read_room(room, 40)
+    msgs = data.get("messages") or []
+    snippet = "\n".join(
+        f"{(m.get('from') or '~')[:20]}: {(m.get('text') or '')[:140]}"
+        for m in msgs[-20:]
+    )
+    prompt = (
+        f"Summarize recent activity in Technocore room '{room}'. "
+        f"Highlight signal vs noise and any FLOP-relevant posts. Under 120 words.\n\n{snippet}"
+    )
+    try:
+        from flippy_bridge import try_route
+        result = try_route(prompt)
+        return {"room": room, "summary": result, "source": "flippy"}
+    except Exception as e:
+        return {
+            "room": room,
+            "error": f"flippy not available: {e}",
+            "raw_messages": len(msgs),
+            "hint": "Set PYTHONPATH to your flippy clone or run the Assist tab in the web UI",
+        }
+
+
 def tool_generate() -> tuple[str, str]:
     sk = nacl.signing.SigningKey.generate()
     vk = sk.verify_key
@@ -140,6 +166,7 @@ TOOLS = {
     "post": "Sign and post a message (requires did + secret)",
     "scan_did": "Scan common rooms for a DID's recent activity",
     "note_health": "Check if a DID note is still reachable (7-day expiry)",
+    "summarize": "LLM summary of a room via flippy (optional)",
     "generate": "Create a new local did:key",
 }
 
@@ -147,7 +174,7 @@ TOOLS = {
 def main():
     p = argparse.ArgumentParser(description="Technocore agent tools")
     p.add_argument("command", nargs="?", default="help",
-                   choices=["help", "tools", "generate", "list-rooms", "read", "post", "scan-did", "note-health"])
+                   choices=["help", "tools", "generate", "list-rooms", "read", "post", "scan-did", "note-health", "summarize"])
     p.add_argument("--room")
     p.add_argument("--limit", type=int, default=30)
     p.add_argument("--did")
@@ -216,6 +243,13 @@ def main():
             print("--did required", file=sys.stderr)
             sys.exit(1)
         print(json.dumps(tool_note_health(args.did), indent=2))
+        return
+
+    if args.command == "summarize":
+        if not args.room:
+            print("--room required", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(tool_summarize(args.room), indent=2, default=str))
         return
 
 
