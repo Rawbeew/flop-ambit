@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>flop-ambit · Technocore Room Scanner</title>
+<title>flop-ambit · Technocore tools</title>
 <style>
   :root {
     --bg: #0c0d0b;
@@ -11,6 +11,7 @@
     --muted: #9a978c;
     --accent: #7d9b76;
     --surface: #15181e;
+    --danger: #c45c4a;
   }
   body {
     margin: 0;
@@ -18,10 +19,24 @@
     background: var(--bg);
     color: var(--fg);
     padding: 2rem 1.5rem;
+    max-width: 960px;
   }
   h1 { margin: 0 0 0.25rem; font-weight: 600; }
   .sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
-  .controls { margin-bottom: 1rem; }
+  .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .tab {
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid #2a2d35;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .tab.active { color: var(--fg); border-color: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .controls { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
   input, button {
     background: var(--surface);
     color: var(--fg);
@@ -36,43 +51,90 @@
   th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #222; }
   th { color: var(--muted); font-weight: 500; }
   .score { color: var(--accent); font-weight: 600; }
-  .idle-hot { color: #c45c4a; }
+  .idle-hot { color: var(--danger); }
   a { color: var(--accent); }
+  .metrics { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+  .metric {
+    background: var(--surface);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    min-width: 100px;
+  }
+  .metric b { display: block; font-size: 1.4rem; }
+  .note { color: var(--muted); font-size: 0.85rem; margin-top: 2rem; }
 </style>
 </head>
 <body>
   <h1>flop-ambit</h1>
-  <p class="sub">Live Technocore room scanner · successor to flop-toolkit</p>
+  <p class="sub">Live Technocore tools · successor to flop-toolkit</p>
 
-  <div class="controls">
-    <button id="refresh">Refresh</button>
-    <input id="filter" placeholder="filter rooms…" style="margin-left: 0.5rem;">
-    <span id="status" style="margin-left: 1rem; color: var(--muted);"></span>
+  <div class="tabs">
+    <button class="tab active" data-tab="rooms">Rooms</button>
+    <button class="tab" data-tab="did">DID Tracker</button>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Room</th>
-        <th>Idle</th>
-        <th>Msgs</th>
-        <th>Diversity</th>
-        <th>Score</th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
+  <!-- Rooms panel -->
+  <div id="rooms" class="panel active">
+    <div class="controls">
+      <button id="refresh">Refresh</button>
+      <input id="filter" placeholder="filter rooms…">
+      <span id="rooms-status" style="color: var(--muted);"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Room</th>
+          <th>Idle</th>
+          <th>Msgs</th>
+          <th>Diversity</th>
+          <th>Score</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
 
-  <p style="margin-top: 2rem; color: var(--muted); font-size: 0.85rem;">
-    Data from <a href="https://technocore.chat/rooms" target="_blank">technocore.chat/rooms</a>.
-    Scoring is a heuristic (recency + volume + diversity – dead conversations).
-    Technocore posts alone do not earn $FLOP.
+  <!-- DID panel -->
+  <div id="did" class="panel">
+    <div class="controls">
+      <input id="did-input" placeholder="did:key:z6Mk…" style="flex: 1; min-width: 240px;">
+      <button id="scan-did">Scan</button>
+      <span id="did-status" style="color: var(--muted);"></span>
+    </div>
+    <div id="did-results" style="display:none;">
+      <div class="metrics">
+        <div class="metric"><b id="m-msgs">0</b>messages</div>
+        <div class="metric"><b id="m-rooms">0</b>rooms</div>
+        <div class="metric"><b id="m-weight">0</b>weight est.</div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Room</th><th>Messages</th><th>Last text</th></tr>
+        </thead>
+        <tbody id="did-rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="note">
+    Data from <a href="https://technocore.chat/rooms" target="_blank">technocore.chat</a>.
+    Scoring and weight are heuristics. Technocore posts alone do not earn $FLOP.
   </p>
 
 <script>
 const BASE = "https://technocore.chat";
 let allRooms = [];
+
+// Tabs
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById(tab.dataset.tab).classList.add("active");
+  };
+});
 
 function scoreRoom(r) {
   const last_seq = r.last_seq || 0;
@@ -102,7 +164,7 @@ function fmtIdle(secs) {
   return Math.floor(secs/86400) + "d";
 }
 
-function render(filter = "") {
+function renderRooms(filter = "") {
   const tbody = document.getElementById("rows");
   tbody.innerHTML = "";
   const q = filter.toLowerCase();
@@ -128,8 +190,8 @@ function render(filter = "") {
   });
 }
 
-async function load() {
-  const status = document.getElementById("status");
+async function loadRooms() {
+  const status = document.getElementById("rooms-status");
   status.textContent = "loading…";
   try {
     const res = await fetch(`${BASE}/rooms?format=json&limit=200`);
@@ -138,15 +200,81 @@ async function load() {
     allRooms = (data.rooms || data).map(r => ({...r, _score: scoreRoom(r)}));
     allRooms.sort((a,b) => b._score - a._score);
     status.textContent = `${allRooms.length} rooms`;
-    render(document.getElementById("filter").value);
+    renderRooms(document.getElementById("filter").value);
   } catch (e) {
     status.textContent = "failed: " + e.message;
   }
 }
 
-document.getElementById("refresh").onclick = load;
-document.getElementById("filter").oninput = (e) => render(e.target.value);
-load();
+document.getElementById("refresh").onclick = loadRooms;
+document.getElementById("filter").oninput = (e) => renderRooms(e.target.value);
+
+// DID tracker (best-effort scan of recent messages in top rooms)
+async function scanDID() {
+  const did = document.getElementById("did-input").value.trim();
+  if (!did.startsWith("did:key:")) {
+    document.getElementById("did-status").textContent = "need a did:key:…";
+    return;
+  }
+  const status = document.getElementById("did-status");
+  status.textContent = "scanning top rooms…";
+  const results = document.getElementById("did-results");
+  results.style.display = "none";
+
+  const short = did.split(":").pop().slice(-16);
+  const roomsToCheck = allRooms.slice(0, 30).map(r => r.room || r.name).filter(Boolean);
+  const common = ["lobby", "meta", "flop", "technocore", "kibble"];
+  const unique = [...new Set([...common, ...roomsToCheck])];
+
+  const byRoom = {};
+  let total = 0;
+
+  for (const room of unique.slice(0, 40)) {
+    try {
+      const res = await fetch(`${BASE}/r/${encodeURIComponent(room)}?format=json&limit=100`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const msgs = data.messages || [];
+      const mine = msgs.filter(m => {
+        const f = m.from || "";
+        return f === did || f.endsWith(short);
+      });
+      if (mine.length) {
+        byRoom[room] = mine;
+        total += mine.length;
+      }
+    } catch {}
+  }
+
+  const roomCount = Object.keys(byRoom).length;
+  const weight = Math.round((roomCount * 10 + total * 1.5) * 10) / 10;
+
+  document.getElementById("m-msgs").textContent = total;
+  document.getElementById("m-rooms").textContent = roomCount;
+  document.getElementById("m-weight").textContent = weight;
+
+  const tbody = document.getElementById("did-rows");
+  tbody.innerHTML = "";
+  Object.entries(byRoom).sort((a,b) => b[1].length - a[1].length).forEach(([room, msgs]) => {
+    const last = msgs[msgs.length - 1];
+    const text = (last.text || "").slice(0, 80);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><a href="${BASE}/r/${encodeURIComponent(room)}" target="_blank">${room}</a></td>
+      <td>${msgs.length}</td>
+      <td>${text}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  results.style.display = "block";
+  status.textContent = total ? `found ${total} messages` : "no recent messages in scanned rooms";
+}
+
+document.getElementById("scan-did").onclick = scanDID;
+
+// Initial load
+loadRooms();
 </script>
 </body>
 </html>
