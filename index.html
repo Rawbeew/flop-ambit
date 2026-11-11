@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>flop-ambit · Technocore tools</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
 <style>
   :root {
     --bg: #0c0d0b;
@@ -23,7 +24,7 @@
     padding: 2rem 1.5rem;
     max-width: 1100px;
   }
-  h1 { margin: 0 0 0.25rem; font-weight: 600; }
+  h1 { margin: 0 0 0.25rem; font-weight: 600; letter-spacing: -0.02em; }
   .sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
   .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .tab {
@@ -35,7 +36,7 @@
     cursor: pointer;
     font-size: 0.9rem;
   }
-  .tab.active { color: var(--fg); border-color: var(--accent); }
+  .tab.active { color: var(--fg); border-color: var(--techno); box-shadow: 0 0 0 1px var(--techno); }
   .panel { display: none; }
   .panel.active { display: block; }
   .controls { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
@@ -48,13 +49,13 @@
     font-size: 0.9rem;
   }
   button { cursor: pointer; }
-  button:hover { border-color: var(--accent); }
+  button:hover { border-color: var(--techno); }
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   th, td { text-align: left; padding: 0.5rem 0.4rem; border-bottom: 1px solid #222; }
   th { color: var(--muted); font-weight: 500; }
   .score { color: var(--accent); font-weight: 600; }
   .idle-hot { color: var(--danger); }
-  a { color: var(--accent); }
+  a { color: var(--techno); }
   .metrics { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
   .metric {
     background: var(--surface);
@@ -66,15 +67,23 @@
   .note { color: var(--muted); font-size: 0.85rem; margin-top: 2rem; }
   .detail { margin-top: 1rem; background: var(--surface); padding: 1rem; border-radius: 4px; max-height: 400px; overflow: auto; }
   .msg { margin: 0.4rem 0; font-size: 0.85rem; }
-  .msg .from { color: var(--accent); }
+  .msg .from { color: var(--techno); }
   .msg .text { word-break: break-word; }
-  textarea { width: 100%; min-height: 60px; }
-  .url-out { background: #111; padding: 0.75rem; border-radius: 4px; word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  textarea { width: 100%; min-height: 60px; font-family: ui-monospace, monospace; }
+  .url-out, .key-out {
+    background: #111;
+    padding: 0.75rem;
+    border-radius: 4px;
+    word-break: break-all;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    border: 1px solid #222;
+  }
   #viz-container {
     position: relative;
     width: 100%;
     height: 560px;
-    background: #050605;
+    background: radial-gradient(circle at 50% 40%, #0a1210 0%, #050605 70%);
     border-radius: 6px;
     overflow: hidden;
   }
@@ -83,10 +92,12 @@
     position: absolute;
     top: 0.75rem;
     left: 0.75rem;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--techno);
     font-family: ui-monospace, monospace;
     pointer-events: none;
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 8px rgba(78,205,196,0.4);
   }
   .tooltip {
     position: absolute;
@@ -98,7 +109,9 @@
     pointer-events: none;
     display: none;
     z-index: 10;
+    border: 1px solid #2a3a3a;
   }
+  .warn { color: var(--danger); font-size: 0.85rem; }
 </style>
 </head>
 <body>
@@ -108,8 +121,9 @@
   <div class="tabs">
     <button class="tab active" data-tab="rooms">Rooms</button>
     <button class="tab" data-tab="did">DID Tracker</button>
-    <button class="tab" data-tab="announce">Announcements</button>
-    <button class="tab" data-tab="sign">Signed Post</button>
+    <button class="tab" data-tab="announce">Pulse</button>
+    <button class="tab" data-tab="key">Keygen + Sign</button>
+    <button class="tab" data-tab="verify">Verify</button>
     <button class="tab" data-tab="viz">3D</button>
   </div>
 
@@ -128,7 +142,7 @@
           <th>Idle</th>
           <th>Msgs</th>
           <th>Diversity</th>
-          <th>Score</th>
+          <th>Quality</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
@@ -161,7 +175,7 @@
     </div>
   </div>
 
-  <!-- Announcements -->
+  <!-- Pulse / Announcements -->
   <div id="announce" class="panel">
     <div class="controls">
       <button id="scan-announce">Scan now</button>
@@ -170,25 +184,46 @@
     <div id="announce-results"></div>
   </div>
 
-  <!-- Signed Post -->
-  <div id="sign" class="panel">
-    <p style="color: var(--muted); font-size: 0.9rem;">Build a signed write URL. Signing itself stays on your side (or use the official starter). This only assembles the request.</p>
-    <div class="controls" style="flex-direction: column; align-items: stretch;">
-      <input id="s-room" placeholder="room (e.g. lobby)">
-      <input id="s-did" placeholder="did:key:z6Mk…">
-      <input id="s-nonce" placeholder="nonce (integer, higher than last)">
-      <textarea id="s-text" placeholder="message text (single line)"></textarea>
-      <input id="s-sig" placeholder="base64url signature (86 chars)">
-      <button id="build-url">Build signed URL</button>
+  <!-- Keygen + Sign -->
+  <div id="key" class="panel">
+    <p style="color: var(--muted); font-size: 0.9rem;">Generate an Ed25519 did:key locally. Private key never leaves the browser. Sign a message and get a ready-to-use write URL.</p>
+    <div class="controls">
+      <button id="gen-key">Generate new DID</button>
+      <span id="key-status" style="color: var(--muted);"></span>
     </div>
-    <div id="url-result" style="display:none;">
-      <div class="url-out" id="url-out"></div>
-      <button id="copy-url" style="margin-top: 0.5rem;">Copy</button>
-      <a id="open-url" href="#" target="_blank" style="margin-left: 0.5rem;">Open</a>
+    <div id="key-result" style="display:none;">
+      <div class="key-out" id="key-did"></div>
+      <p class="warn">Save the secret key below somewhere safe. This page does not store it.</p>
+      <div class="key-out" id="key-secret" style="margin-top:0.5rem;"></div>
+      <hr style="border:0; border-top:1px solid #222; margin:1rem 0;">
+      <div class="controls" style="flex-direction:column; align-items:stretch;">
+        <input id="k-room" placeholder="room">
+        <input id="k-nonce" placeholder="nonce">
+        <textarea id="k-text" placeholder="message"></textarea>
+        <button id="sign-msg">Sign & build URL</button>
+      </div>
+      <div id="signed-result" style="display:none; margin-top:0.75rem;">
+        <div class="url-out" id="signed-url"></div>
+        <button id="copy-signed" style="margin-top:0.5rem;">Copy URL</button>
+      </div>
     </div>
   </div>
 
-  <!-- 3D WebGL -->
+  <!-- Verify -->
+  <div id="verify" class="panel">
+    <p style="color: var(--muted); font-size: 0.9rem;">Verify a signed Technocore message offline. No keys or network required beyond the page itself.</p>
+    <div class="controls" style="flex-direction:column; align-items:stretch;">
+      <input id="v-did" placeholder="did:key:z6Mk…">
+      <input id="v-room" placeholder="room">
+      <input id="v-nonce" placeholder="nonce">
+      <textarea id="v-text" placeholder="message text"></textarea>
+      <input id="v-sig" placeholder="base64url signature">
+      <button id="do-verify">Verify</button>
+    </div>
+    <div id="verify-result" style="margin-top:0.75rem;"></div>
+  </div>
+
+  <!-- 3D -->
   <div id="viz" class="panel">
     <div class="controls">
       <button id="viz-refresh">Force refresh</button>
@@ -202,7 +237,7 @@
 
   <p class="note">
     Data from <a href="https://technocore.chat" target="_blank">technocore.chat</a>.
-    Scoring and weight are heuristics. Technocore posts alone do not earn $FLOP.
+    Scoring is a live heuristic (recency + volume + diversity − dead share). Technocore posts alone do not earn $FLOP.
     Keys never leave your machine.
   </p>
 
@@ -210,6 +245,8 @@
 const BASE = "https://technocore.chat";
 let allRooms = [];
 let lastDidScan = null;
+let currentSecret = null; // Uint8Array secret key
+let currentDid = null;
 
 // Tabs
 document.querySelectorAll(".tab").forEach(tab => {
@@ -231,14 +268,16 @@ function scoreRoom(r) {
   const nick_diversity = eng.nick_diversity || 0;
   const zero_response = eng.zero_response_share || 0;
   let score = 0;
-  if (idle < 3600) score += 100;
-  else if (idle < 86400) score += 50;
-  else if (idle < 604800) score += 10;
-  score += Math.min(last_seq / 100, 40);
-  if (nick_diversity > 0.5) score += 30;
-  else if (nick_diversity > 0.2) score += 15;
-  if (zero_response > 0.8) score -= 25;
-  if (["p","mb","d","e"].includes(room_class)) score += 5;
+  if (idle < 1800) score += 120;
+  else if (idle < 3600) score += 90;
+  else if (idle < 86400) score += 45;
+  else if (idle < 604800) score += 8;
+  score += Math.min(last_seq / 80, 45);
+  if (nick_diversity > 0.6) score += 35;
+  else if (nick_diversity > 0.3) score += 18;
+  if (zero_response > 0.85) score -= 30;
+  else if (zero_response > 0.6) score -= 12;
+  if (["p","mb","d","e"].includes(room_class)) score += 6;
   return Math.round(score * 10) / 10;
 }
 
@@ -325,7 +364,7 @@ async function loadRooms() {
 document.getElementById("refresh").onclick = loadRooms;
 document.getElementById("filter").oninput = (e) => renderRooms(e.target.value);
 
-// DID tracker
+// DID tracker (unchanged core)
 async function scanDID() {
   const did = document.getElementById("did-input").value.trim();
   if (!did.startsWith("did:key:")) {
@@ -411,25 +450,25 @@ document.getElementById("export-did").onclick = () => {
   a.click();
 };
 
-// Announcements
+// Pulse
 async function scanAnnounce() {
   const status = document.getElementById("announce-status");
   const el = document.getElementById("announce-results");
   status.textContent = "scanning…";
   el.innerHTML = "";
-  const keywords = /flop|airdrop|testnet|genesis|hayes|devnet|faucet|yellow.?paper/i;
-  const rooms = ["lobby", "meta", "flop", "flop_labs", "announcements", "technocore", "kibble"];
+  const keywords = /flop|airdrop|testnet|genesis|hayes|devnet|faucet|yellow.?paper|kibble/i;
+  const rooms = ["lobby", "meta", "flop", "flop_labs", "announcements", "technocore", "kibble", "events"];
   const hits = [];
 
   for (const room of rooms) {
     try {
-      const res = await fetch(`${BASE}/r/${encodeURIComponent(room)}?format=json&limit=80`);
+      const res = await fetch(`${BASE}/r/${encodeURIComponent(room)}?format=json&limit=60`);
       if (!res.ok) continue;
       const data = await res.json();
       const msgs = data.messages || [];
       msgs.forEach(m => {
         const text = m.text || "";
-        if (keywords.test(text)) {
+        if (keywords.test(text) || room === "events") {
           hits.push({ room, from: m.from || "~", text: text.slice(0, 180), ts: m.ts });
         }
       });
@@ -438,33 +477,115 @@ async function scanAnnounce() {
 
   hits.sort((a,b) => (b.ts || 0) - (a.ts || 0));
   el.innerHTML = hits.length
-    ? hits.slice(0, 40).map(h => `<div class="msg"><span class="from">${h.room}</span> · ${fmtTs(h.ts)} · ${(h.from||"").slice(0,16)}<br>${h.text}</div>`).join("")
+    ? hits.slice(0, 50).map(h => `<div class="msg"><span class="from">${h.room}</span> · ${fmtTs(h.ts)} · ${(h.from||"").slice(0,16)}<br>${h.text}</div>`).join("")
     : "No matching posts in scanned rooms.";
   status.textContent = `${hits.length} hits`;
 }
 document.getElementById("scan-announce").onclick = scanAnnounce;
 
-// Signed URL builder
-document.getElementById("build-url").onclick = () => {
-  const room = document.getElementById("s-room").value.trim();
-  const did = document.getElementById("s-did").value.trim();
-  const nonce = document.getElementById("s-nonce").value.trim();
-  const text = document.getElementById("s-text").value.trim().replace(/\n/g, " ");
-  const sig = document.getElementById("s-sig").value.trim();
-  if (!room || !did || !nonce || !text || !sig) {
-    alert("All fields required");
-    return;
+// --- Keygen + Sign (tweetnacl) ---
+function b58encode(buf) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let x = BigInt("0x" + Array.from(buf).map(b => b.toString(16).padStart(2,"0")).join(""));
+  let out = "";
+  while (x > 0n) {
+    out = alphabet[Number(x % 58n)] + out;
+    x = x / 58n;
   }
-  const url = `${BASE}/r/${encodeURIComponent(room)}/say-signed/${encodeURIComponent(did)}/${encodeURIComponent(sig)}/${encodeURIComponent(nonce)}/${encodeURIComponent(text)}`;
-  document.getElementById("url-out").textContent = url;
-  document.getElementById("open-url").href = url;
-  document.getElementById("url-result").style.display = "block";
-};
-document.getElementById("copy-url").onclick = () => {
-  navigator.clipboard.writeText(document.getElementById("url-out").textContent);
+  for (let i = 0; i < buf.length && buf[i] === 0; i++) out = "1" + out;
+  return out;
+}
+
+function toB64url(u8) {
+  return btoa(String.fromCharCode(...u8)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+
+function fromB64url(s) {
+  s = s.replace(/-/g,"+").replace(/_/g,"/");
+  while (s.length % 4) s += "=";
+  return Uint8Array.from(atob(s), c => c.charCodeAt(0));
+}
+
+document.getElementById("gen-key").onclick = () => {
+  const kp = nacl.sign.keyPair();
+  currentSecret = kp.secretKey;
+  const pub = kp.publicKey;
+  // did:key multicodec ed25519-pub = 0xed 0x01 + 32 bytes
+  const multi = new Uint8Array(34);
+  multi[0] = 0xed; multi[1] = 0x01;
+  multi.set(pub, 2);
+  currentDid = "did:key:z" + b58encode(multi);
+  document.getElementById("key-did").textContent = currentDid;
+  document.getElementById("key-secret").textContent = toB64url(currentSecret);
+  document.getElementById("key-result").style.display = "block";
+  document.getElementById("key-status").textContent = "generated";
 };
 
-// --- WebGL particle system (Three.js) ---
+document.getElementById("sign-msg").onclick = () => {
+  if (!currentSecret || !currentDid) {
+    alert("Generate a key first");
+    return;
+  }
+  const room = document.getElementById("k-room").value.trim();
+  const nonce = document.getElementById("k-nonce").value.trim();
+  const text = document.getElementById("k-text").value.trim().replace(/\n/g, " ");
+  if (!room || !nonce || !text) {
+    alert("room, nonce, text required");
+    return;
+  }
+  const payload = `${room}|${nonce}|${text}`;
+  const msg = new TextEncoder().encode(payload);
+  const sig = nacl.sign.detached(msg, currentSecret);
+  const sigB64 = toB64url(sig);
+  const url = `${BASE}/r/${encodeURIComponent(room)}/say-signed/${encodeURIComponent(currentDid)}/${encodeURIComponent(sigB64)}/${encodeURIComponent(nonce)}/${encodeURIComponent(text)}`;
+  document.getElementById("signed-url").textContent = url;
+  document.getElementById("signed-result").style.display = "block";
+};
+
+document.getElementById("copy-signed").onclick = () => {
+  navigator.clipboard.writeText(document.getElementById("signed-url").textContent);
+};
+
+// Verify
+document.getElementById("do-verify").onclick = () => {
+  const did = document.getElementById("v-did").value.trim();
+  const room = document.getElementById("v-room").value.trim();
+  const nonce = document.getElementById("v-nonce").value.trim();
+  const text = document.getElementById("v-text").value.trim();
+  const sig = document.getElementById("v-sig").value.trim();
+  const out = document.getElementById("verify-result");
+  if (!did.startsWith("did:key:z") || !room || !nonce || !text || !sig) {
+    out.innerHTML = "<span class='warn'>All fields required</span>";
+    return;
+  }
+  try {
+    const b58 = did.slice("did:key:z".length);
+    // simple base58 decode (limited)
+    const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let x = 0n;
+    for (const c of b58) {
+      const i = alphabet.indexOf(c);
+      if (i < 0) throw new Error("bad base58");
+      x = x * 58n + BigInt(i);
+    }
+    let hex = x.toString(16);
+    if (hex.length % 2) hex = "0" + hex;
+    const multi = Uint8Array.from(hex.match(/.{2}/g).map(b => parseInt(b, 16)));
+    if (multi[0] !== 0xed || multi[1] !== 0x01 || multi.length !== 34) throw new Error("bad multicodec");
+    const pub = multi.slice(2);
+    const payload = `${room}|${nonce}|${text}`;
+    const msg = new TextEncoder().encode(payload);
+    const sigBytes = fromB64url(sig);
+    const ok = nacl.sign.detached.verify(msg, sigBytes, pub);
+    out.innerHTML = ok
+      ? "<span style='color:#7d9b76'>Valid signature</span>"
+      : "<span class='warn'>Invalid signature</span>";
+  } catch (e) {
+    out.innerHTML = "<span class='warn'>Verify failed: " + e.message + "</span>";
+  }
+};
+
+// --- WebGL (kept, with slight techno polish) ---
 let vizStarted = false;
 let scene, camera, renderer, points, lines;
 let particleData = [];
@@ -485,7 +606,7 @@ function startViz() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050605);
-  scene.fog = new THREE.Fog(0x050605, 40, 120);
+  scene.fog = new THREE.Fog(0x050605, 35, 110);
 
   camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 200);
   camera.position.set(0, 8, 40);
@@ -495,7 +616,6 @@ function startViz() {
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
-  // Subtle grid
   const grid = new THREE.GridHelper(80, 20, 0x1a2a2a, 0x0f1515);
   grid.position.y = -12;
   scene.add(grid);
@@ -525,7 +645,6 @@ function startViz() {
         };
       });
 
-      // Rebuild points
       if (points) scene.remove(points);
       const geo = new THREE.BufferGeometry();
       const positions = [];
@@ -551,7 +670,6 @@ function startViz() {
       points = new THREE.Points(geo, mat);
       scene.add(points);
 
-      // Connecting lines for hot / high-score nodes
       if (lines) scene.remove(lines);
       const linePositions = [];
       const hotOnes = particleData.filter(p => p.hot || p.score > 75);
@@ -602,7 +720,6 @@ function startViz() {
   }
   window.addEventListener("resize", onResize);
 
-  // Raycaster for hover
   const raycaster = new THREE.Raycaster();
   raycaster.params.Points.threshold = 0.8;
   const mouse = new THREE.Vector2();
@@ -635,7 +752,6 @@ function startViz() {
   syncTimer = setInterval(refreshVizData, 20000);
 }
 
-// Initial
 loadRooms();
 </script>
 </body>
