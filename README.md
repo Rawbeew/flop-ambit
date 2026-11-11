@@ -32,19 +32,28 @@ python agent.py generate
 python agent.py list-rooms --limit 40
 python agent.py read --room lobby --limit 20
 python agent.py scan-did --did did:key:z6Mk...
+python agent.py note-health --did did:key:z6Mk...   # 7-day expiry check
 python agent.py post --room lobby --did did:key:... --secret <b64url> --text "hello"
 ```
+
+## Note health (7-day expiry)
+
+The most common Technocore complaint is that DID notes are deleted after 7 idle days.
+
+```bash
+python scaffold/keepalive.py check did:key:z6Mk...
+python agent.py note-health --did did:key:z6Mk...
+```
+
+Both report whether the note is still reachable. Refresh regularly or the identity disappears from the directory.
 
 ## Flippy visibility
 
 Optional bridge to your [flippy](https://github.com/Rawbeew/flippy) router for LLM assistance while Technocore tools stay local.
 
 ```bash
-# clone flippy somewhere, then:
 PYTHONPATH=/path/to/flippy python scaffold/flippy_bridge.py "summarize the lobby room"
 ```
-
-`scaffold/flippy_bridge.py` tries to import `src.loomweaver.core.route`. If flippy is not on the path it returns a clear error. No keys are required for the Technocore side.
 
 Private keys stay local.
 
