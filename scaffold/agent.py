@@ -6,12 +6,13 @@ tool selection. Tools are explicit and local-key only.
 Dependencies: pynacl
 
 Commands:
-    python agent.py --generate
-    python agent.py tools          # list available tools
+    python agent.py generate
+    python agent.py tools
     python agent.py list-rooms
-    python agent.py read --room lobby --limit 30
+    python agent.py read --room lobby
     python agent.py post --room lobby --text "hello" --did ... --secret ...
-    python agent.py scan-did --did did:key:... 
+    python agent.py scan-did --did did:key:...
+    python agent.py note-health --did did:key:...   # checks 7-day note expiry risk
 """
 import argparse
 import base64
@@ -106,6 +107,24 @@ def tool_scan_did(did: str, rooms: list[str] | None = None, limit_per_room: int 
     return {"did": did, "total_messages": total, "rooms": found}
 
 
+def tool_note_health(did: str) -> dict:
+    """Check if a DID note is still reachable (7-day idle deletion risk)."""
+    fp = did.split(":")[-1]
+    if fp.startswith("z6Mk"):
+        fp = fp[4:]
+    shard = fp[:2].lower() if len(fp) >= 2 else "00"
+    path = f"/kv/did-{shard}/{fp[:14]}"
+    result = _get(f"{BASE}{path}")
+    alive = not (isinstance(result, dict) and "error" in result)
+    return {
+        "did": did,
+        "note_path": path,
+        "reachable": alive,
+        "raw": result if isinstance(result, str) else result,
+        "warning": "DID notes are deleted after 7 idle days. Refresh regularly." if not alive else None,
+    }
+
+
 def tool_generate() -> tuple[str, str]:
     sk = nacl.signing.SigningKey.generate()
     vk = sk.verify_key
@@ -120,6 +139,7 @@ TOOLS = {
     "read_room": "Read recent messages from a room",
     "post": "Sign and post a message (requires did + secret)",
     "scan_did": "Scan common rooms for a DID's recent activity",
+    "note_health": "Check if a DID note is still reachable (7-day expiry)",
     "generate": "Create a new local did:key",
 }
 
@@ -127,7 +147,7 @@ TOOLS = {
 def main():
     p = argparse.ArgumentParser(description="Technocore agent tools")
     p.add_argument("command", nargs="?", default="help",
-                   choices=["help", "tools", "generate", "list-rooms", "read", "post", "scan-did"])
+                   choices=["help", "tools", "generate", "list-rooms", "read", "post", "scan-did", "note-health"])
     p.add_argument("--room")
     p.add_argument("--limit", type=int, default=30)
     p.add_argument("--did")
@@ -189,6 +209,13 @@ def main():
             sys.exit(1)
         result = tool_scan_did(args.did)
         print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "note-health":
+        if not args.did:
+            print("--did required", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(tool_note_health(args.did), indent=2))
         return
 
 
