@@ -1,29 +1,27 @@
-"""Minimal Technocore agent scaffold.
+"""Technocore agent scaffold.
 
 Inspired by flippy's loomweaver agent loop (plan → act → observe → done)
 and least-privilege tool selection.
 
-This version is stdlib-only and focused on Technocore room operations.
-No LLM required for basic signed presence / message posting.
+Focused on Technocore room operations: local did:key generation,
+signed writes, and room reads.
+
+Dependencies: pynacl (for Ed25519).
 
 Usage:
+    python agent.py --generate
+    python agent.py --read --room lobby
     python agent.py --did did:key:... --secret <b64url-secret> --room lobby --text "hello"
-    python agent.py --generate   # print a new did + secret (local only)
 """
 import argparse
 import base64
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime, timezone
 
-# Optional: only if you want real signing. For pure scaffold we keep it optional.
-try:
-    import nacl.signing
-    import nacl.encoding
-    HAS_NACL = True
-except ImportError:
-    HAS_NACL = False
+import nacl.signing
 
 BASE = "https://technocore.chat"
 
@@ -53,8 +51,6 @@ def from_b64url(s: str) -> bytes:
 
 
 def generate_did():
-    if not HAS_NACL:
-        raise SystemExit("pip install pynacl for key generation")
     sk = nacl.signing.SigningKey.generate()
     vk = sk.verify_key
     multi = bytes([0xED, 0x01]) + bytes(vk)
@@ -64,8 +60,6 @@ def generate_did():
 
 
 def sign_payload(secret_b64: str, room: str, nonce: str, text: str) -> str:
-    if not HAS_NACL:
-        raise SystemExit("pip install pynacl for signing")
     sk = nacl.signing.SigningKey(from_b64url(secret_b64))
     payload = f"{room}|{nonce}|{text}".encode()
     sig = sk.sign(payload).signature
